@@ -2,8 +2,10 @@ name: Weekly PKGBUILD Release
 
 on:
   schedule:
+    # هر دوشنبه ساعت 00:00 UTC
     - cron: "0 0 * * 1"
 
+  # امکان اجرای دستی از GitHub Actions
   workflow_dispatch:
 
 permissions:
@@ -13,23 +15,37 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
 
+    # استفاده از آخرین نسخه Arch Linux
     container:
       image: archlinux:latest
 
     steps:
-      - name: Update system and install dependencies
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git
-
+      # دریافت سورس پروژه
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # آپدیت Arch و نصب ابزارهای لازم
+      - name: Install build tools
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            base-devel \
+            git \
+            sudo
+
+      # ساخت کاربر غیر root برای makepkg
       - name: Create build user
         run: |
           useradd -m builder
+
+          # اجازه نصب خودکار وابستگی‌ها بدون نیاز به پسورد
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chmod 440 /etc/sudoers.d/builder
+
+          # دادن مالکیت سورس به کاربر builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
+      # ساخت پکیج و نصب خودکار وابستگی‌های PKGBUILD
       - name: Build package
         run: |
           su builder -c "
@@ -37,29 +53,45 @@ jobs:
             makepkg -sf --noconfirm --cleanbuild
           "
 
+      # آماده‌سازی فایل‌های خروجی
       - name: Prepare release files
         run: |
           mkdir -p release
 
-          find . -maxdepth 1 -type f \
+          find "$GITHUB_WORKSPACE" -maxdepth 1 -type f \
             \( -name '*.pkg.tar.zst' -o -name '*.pkg.tar.xz' \) \
             -exec cp {} release/ \;
 
+          echo "Generated packages:"
           ls -lh release/
 
+          # در صورت ساخته نشدن پکیج، ورک‌فلو fail شود
+          if [ -z "$(ls -A release)" ]; then
+            echo "ERROR: No package files were generated!"
+            exit 1
+          fi
+
+      # ایجاد تگ یکتا بر اساس تاریخ
       - name: Generate release tag
         id: tag
         run: |
           TAG="weekly-$(date -u +'%Y-%m-%d')"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      # ساخت GitHub Release و آپلود پکیج
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Weekly Release ${{ steps.tag.outputs.tag }}
           body: |
-            Automatic weekly package build.
+            ## Automatic Weekly Build
+
+            This package was automatically built from the latest PKGBUILD.
+
+            Build date: ${{ github.run_started_at }}
+            Commit: ${{ github.sha }}
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
