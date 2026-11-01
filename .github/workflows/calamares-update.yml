@@ -19,12 +19,12 @@ jobs:
       image: archlinux:latest
 
     steps:
-      # 1. Checkout source
+      # 1. Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Update Arch Linux and install build tools
-      - name: Install build tools
+      # 2. Install system tools
+      - name: Install system tools
         run: |
           pacman -Syu --noconfirm
 
@@ -33,93 +33,94 @@ jobs:
             git \
             sudo
 
-      # 3. Create unprivileged build user
-      - name: Create build user
+      # 3. Create builder user and configure sudo
+      - name: Create builder user
         run: |
-          useradd -m builder
+          useradd -m -s /bin/bash builder
 
+          # Disable password authentication
+          passwd -l builder
+
+          # Enable passwordless root access through sudo
+          echo "builder ALL=(ALL:ALL) NOPASSWD: ALL" \
+            > /etc/sudoers.d/builder
+
+          chmod 440 /etc/sudoers.d/builder
+
+          # Validate sudo configuration
+          visudo -cf /etc/sudoers.d/builder
+
+          # Give builder ownership of workspace
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
-      # 4. Read and install PKGBUILD dependencies as root
-      - name: Install PKGBUILD dependencies
+          # Verify sudo access
+          su - builder -c "sudo -n whoami"
+
+      # 4. Install dependencies and build package
+      - name: Build PKGBUILD
         run: |
-          cd "$GITHUB_WORKSPACE"
-
-          source ./PKGBUILD
-
-          DEPS=(
-            "${depends[@]}"
-            "${makedepends[@]}"
-            "${checkdepends[@]}"
-          )
-
-          echo "Installing package dependencies..."
-
-          if [ "${#DEPS[@]}" -gt 0 ]; then
-            pacman -S --needed --noconfirm "${DEPS[@]}"
-          fi
-
-          echo "Dependencies installed successfully."
-
-      # 5. Build package without dependency installation
-      - name: Build package
-        run: |
-          cd "$GITHUB_WORKSPACE"
-
-          su builder -s /bin/bash -c "
+          su - builder -c "
             cd '$GITHUB_WORKSPACE'
 
-            echo 'Checking makepkg version...'
-            makepkg --version
+            echo '================================'
+            echo 'Builder user:'
+            whoami
 
-            echo 'Building package...'
+            echo 'Sudo verification:'
+            sudo -n whoami
+
+            echo '================================'
+            echo 'Installing dependencies...'
 
             makepkg \
-              --nodeps \
+              --syncdeps \
               --noconfirm \
               --cleanbuild \
               --force
+
+            echo '================================'
+            echo 'Build completed!'
           "
 
-      # 6. Collect generated packages
+      # 5. Prepare release files as builder
       - name: Prepare release files
         run: |
-          mkdir -p release
+          su - builder -c "
+            cd '$GITHUB_WORKSPACE'
 
-          find "$GITHUB_WORKSPACE" \
-            -maxdepth 1 \
-            -type f \
-            \( \
-              -name '*.pkg.tar.zst' \
-              -o -name '*.pkg.tar.xz' \
-            \) \
-            -exec cp {} release/ \;
+            mkdir -p release
 
-          echo "Generated packages:"
+            find . -maxdepth 1 -type f \
+              \( \
+                -name '*.pkg.tar.zst' \
+                -o -name '*.pkg.tar.xz' \
+              \) \
+              -exec cp {} release/ \;
 
-          ls -lh release/
+            echo 'Generated packages:'
+            ls -lh release/
 
-          if [ -z "$(ls -A release)" ]; then
-            echo "ERROR: No package files generated!"
-            exit 1
-          fi
+            if [ -z \"\$(ls -A release)\" ]; then
+              echo 'ERROR: No packages generated!'
+              exit 1
+            fi
+          "
 
-      # 7. Generate weekly release tag
+      # 6. Generate weekly release tag
       - name: Generate release tag
         id: tag
         run: |
           TAG="weekly-$(date -u +'%Y-%m-%d')"
-
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # 8. Publish GitHub Release
+      # 7. Publish GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Weekly Release ${{ steps.tag.outputs.tag }}
           body: |
-            # Automatic Weekly Build
+            ## Automatic Weekly Build
 
             Package: Calamares
 
@@ -127,7 +128,7 @@ jobs:
 
             Source commit: ${{ github.sha }}
 
-            Automatically built using Arch Linux and GitHub Actions.
+            Built on Arch Linux using builder account.
           files: release/*
           fail_on_unmatched_files: true
         env:
