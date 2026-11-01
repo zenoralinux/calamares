@@ -1,11 +1,10 @@
+
 name: Weekly PKGBUILD Release
 
 on:
   schedule:
-    # هر دوشنبه ساعت 00:00 UTC
     - cron: "0 0 * * 1"
 
-  # امکان اجرای دستی از GitHub Actions
   workflow_dispatch:
 
 permissions:
@@ -15,45 +14,50 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
 
-    # استفاده از آخرین نسخه Arch Linux
     container:
       image: archlinux:latest
 
     steps:
-      # دریافت سورس پروژه
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # آپدیت Arch و نصب ابزارهای لازم
       - name: Install build tools
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm \
+          pacman -S --needed --noconfirm \
             base-devel \
-            git \
-            sudo
+            git
 
-      # ساخت کاربر غیر root برای makepkg
       - name: Create build user
         run: |
           useradd -m builder
-
-          # اجازه نصب خودکار وابستگی‌ها بدون نیاز به پسورد
-          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
-          chmod 440 /etc/sudoers.d/builder
-
-          # دادن مالکیت سورس به کاربر builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
-      # ساخت پکیج و نصب خودکار وابستگی‌های PKGBUILD
+      # Install dependencies as root
+      - name: Install PKGBUILD dependencies
+        run: |
+          cd "$GITHUB_WORKSPACE"
+
+          source ./PKGBUILD
+
+          DEPS=(
+            "${depends[@]}"
+            "${makedepends[@]}"
+            "${checkdepends[@]}"
+          )
+
+          if [ "${#DEPS[@]}" -gt 0 ]; then
+            pacman -S --needed --noconfirm "${DEPS[@]}"
+          fi
+
+      # Build without sudo or dependency installation
       - name: Build package
         run: |
           su builder -c "
             cd '$GITHUB_WORKSPACE'
-            makepkg -sif --noconfirm --cleanbuild
+            makepkg -f --noconfirm --cleanbuild --nodeps
           "
 
-      # آماده‌سازی فایل‌های خروجی
       - name: Prepare release files
         run: |
           mkdir -p release
@@ -62,23 +66,19 @@ jobs:
             \( -name '*.pkg.tar.zst' -o -name '*.pkg.tar.xz' \) \
             -exec cp {} release/ \;
 
-          echo "Generated packages:"
-          ls -lh release/
-
-          # در صورت ساخته نشدن پکیج، ورک‌فلو fail شود
           if [ -z "$(ls -A release)" ]; then
-            echo "ERROR: No package files were generated!"
+            echo "ERROR: No package files generated!"
             exit 1
           fi
 
-      # ایجاد تگ یکتا بر اساس تاریخ
+          ls -lh release/
+
       - name: Generate release tag
         id: tag
         run: |
           TAG="weekly-$(date -u +'%Y-%m-%d')"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      # ساخت GitHub Release و آپلود پکیج
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -87,11 +87,10 @@ jobs:
           body: |
             ## Automatic Weekly Build
 
-            This package was automatically built from the latest PKGBUILD.
-
+            Package: Calamares
             Build date: ${{ github.run_started_at }}
             Commit: ${{ github.sha }}
+
           files: release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
