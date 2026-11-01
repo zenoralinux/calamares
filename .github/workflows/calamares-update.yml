@@ -50,7 +50,7 @@ jobs:
         run: |
           su builder -c "
             cd '$GITHUB_WORKSPACE'
-            makepkg -sf --noconfirm --cleanbuild
+            makepkg -sif --noconfirm --cleanbuild
           "
 
       # آماده‌سازی فایل‌های خروجی
