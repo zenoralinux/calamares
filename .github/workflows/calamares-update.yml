@@ -72,11 +72,7 @@ jobs:
             echo '================================'
             echo 'Installing dependencies...'
 
-            makepkg \
-              --syncdeps \
-              --noconfirm \
-              --cleanbuild \
-              --force
+            makepkg -sif
 
             echo '================================'
             echo 'Build completed!'
