@@ -1,0 +1,66 @@
+name: Weekly PKGBUILD Release
+
+on:
+  schedule:
+    # هر دوشنبه ساعت 00:00 UTC
+    - cron: "0 0 * * 1"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Update system and install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create build user
+        run: |
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Build package
+        run: |
+          su builder -c "
+            cd '$GITHUB_WORKSPACE'
+            makepkg -sf --noconfirm --cleanbuild
+          "
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+
+          find . -maxdepth 1 -type f \
+            \( -name '*.pkg.tar.zst' -o -name '*.pkg.tar.xz' \) \
+            -exec cp {} release/ \;
+
+          ls -lh release/
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          TAG="weekly-$(date -u +'%Y-%m-%d')"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Weekly Release ${{ steps.tag.outputs.tag }}
+          body: |
+            Automatic weekly package build.
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
