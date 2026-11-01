@@ -3,6 +3,7 @@ name: Weekly PKGBUILD Release
 
 on:
   schedule:
+    # Every Monday at 00:00 UTC
     - cron: "0 0 * * 1"
 
   workflow_dispatch:
@@ -18,22 +19,28 @@ jobs:
       image: archlinux:latest
 
     steps:
+      # 1. Checkout source
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Update Arch Linux and install build tools
       - name: Install build tools
         run: |
           pacman -Syu --noconfirm
+
           pacman -S --needed --noconfirm \
             base-devel \
-            git
+            git \
+            sudo
 
+      # 3. Create unprivileged build user
       - name: Create build user
         run: |
           useradd -m builder
+
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
-      # Install dependencies as root
+      # 4. Read and install PKGBUILD dependencies as root
       - name: Install PKGBUILD dependencies
         run: |
           cd "$GITHUB_WORKSPACE"
@@ -46,51 +53,82 @@ jobs:
             "${checkdepends[@]}"
           )
 
+          echo "Installing package dependencies..."
+
           if [ "${#DEPS[@]}" -gt 0 ]; then
             pacman -S --needed --noconfirm "${DEPS[@]}"
           fi
 
-      # Build without sudo or dependency installation
+          echo "Dependencies installed successfully."
+
+      # 5. Build package without dependency installation
       - name: Build package
         run: |
-          su builder -c "
+          cd "$GITHUB_WORKSPACE"
+
+          su builder -s /bin/bash -c "
             cd '$GITHUB_WORKSPACE'
-            makepkg -f --noconfirm --cleanbuild --nodeps
+
+            echo 'Checking makepkg version...'
+            makepkg --version
+
+            echo 'Building package...'
+
+            makepkg \
+              --nodeps \
+              --noconfirm \
+              --cleanbuild \
+              --force
           "
 
+      # 6. Collect generated packages
       - name: Prepare release files
         run: |
           mkdir -p release
 
-          find "$GITHUB_WORKSPACE" -maxdepth 1 -type f \
-            \( -name '*.pkg.tar.zst' -o -name '*.pkg.tar.xz' \) \
+          find "$GITHUB_WORKSPACE" \
+            -maxdepth 1 \
+            -type f \
+            \( \
+              -name '*.pkg.tar.zst' \
+              -o -name '*.pkg.tar.xz' \
+            \) \
             -exec cp {} release/ \;
+
+          echo "Generated packages:"
+
+          ls -lh release/
 
           if [ -z "$(ls -A release)" ]; then
             echo "ERROR: No package files generated!"
             exit 1
           fi
 
-          ls -lh release/
-
+      # 7. Generate weekly release tag
       - name: Generate release tag
         id: tag
         run: |
           TAG="weekly-$(date -u +'%Y-%m-%d')"
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      # 8. Publish GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Weekly Release ${{ steps.tag.outputs.tag }}
           body: |
-            ## Automatic Weekly Build
+            # Automatic Weekly Build
 
             Package: Calamares
-            Build date: ${{ github.run_started_at }}
-            Commit: ${{ github.sha }}
 
+            Build date: ${{ github.run_started_at }}
+
+            Source commit: ${{ github.sha }}
+
+            Automatically built using Arch Linux and GitHub Actions.
           files: release/*
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
