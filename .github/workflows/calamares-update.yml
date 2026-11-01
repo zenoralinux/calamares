@@ -2,7 +2,6 @@ name: Weekly PKGBUILD Release
 
 on:
   schedule:
-    # هر دوشنبه ساعت 00:00 UTC
     - cron: "0 0 * * 1"
 
   workflow_dispatch:
