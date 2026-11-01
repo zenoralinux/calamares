@@ -9,7 +9,17 @@ license=('LGPL')
 depends=( 'qt6-svg' 'qt6-webengine' 'yaml-cpp' 'networkmanager' 'upower' 'kcoreaddons' 'kconfig' 'ki18n' 'kservice' \
 'kwidgetsaddons' 'kpmcore' 'squashfs-tools' 'rsync' 'boost' 'pybind11' 'cryptsetup' 'doxygen' 'dmidecode' \
 'gptfdisk' 'hwinfo' 'kparts' 'polkit-qt6' 'python' 'solid' 'qt6-tools' 'libpwquality' 'ckbcomp' 'qt6-declarative' )
-makedepends=('git' 'cmake' 'extra-cmake-modules' 'python-jsonschema' 'python-pyaml' 'python-unidecode' 'gawk')
+makedepends=(
+    'git'
+    'cmake'
+    'ninja'
+    'extra-cmake-modules'
+    'python-jsonschema'
+    'python-pyaml'
+    'python-unidecode'
+    'gawk'
+    'pkgconf'
+)
 backup=('usr/share/calamares/modules/bootloader.conf'
         'usr/share/calamares/modules/displaymanager.conf'
         'usr/share/calamares/modules/initcpio.conf'
